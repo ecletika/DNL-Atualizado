@@ -41,7 +41,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Carrega configurações iniciais (Local + DB)
   useEffect(() => {
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -71,27 +70,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, []);
 
   const sendEmailViaWeb3Forms = async (subject: string, content: string, clientEmail?: string): Promise<boolean> => {
-    // Busca a chave local ou do DB
     const accessKey = localStorage.getItem('dnl_email_api_key') || settings?.email_api_key;
 
-    if (!accessKey || accessKey.trim() === '') {
-      console.error("Web3Forms Access Key não encontrada.");
+    if (!accessKey) {
+      console.warn("Chave de e-mail não disponível.");
       return false;
     }
 
     try {
-      // Nota: No plano Free do Web3Forms, o email sempre vai para o endereço cadastrado na chave.
-      // O campo 'email' abaixo define o 'Reply-To' para você poder responder ao cliente.
       const response = await fetch("https://api.web3forms.com/submit", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
           access_key: accessKey,
           subject: subject,
-          from_name: "DNL Site",
+          from_name: "DNL Remodelações",
           email: clientEmail || "contacto@dnlremodelacoes.pt",
           message: content,
         }),
@@ -100,7 +93,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const result = await response.json();
       return result.success;
     } catch (error) {
-      console.error("Erro ao disparar API de e-mail:", error);
+      console.error("Erro ao enviar e-mail:", error);
       return false;
     }
   };
@@ -113,17 +106,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const { data } = supabase.storage.from('siteDNL').getPublicUrl(fileName);
       return data.publicUrl;
     } catch (error) {
-      console.error("Erro no upload de imagem:", error);
+      console.error("Erro no upload:", error);
       return null;
     }
   };
 
   const fetchSettings = async () => {
     try {
-      // 1. Tenta buscar do Supabase
       const { data } = await supabase.from('app_settings').select('notification_email, logo_url').limit(1).maybeSingle();
-      
-      // 2. Busca o que está salvo localmente (Fallback)
       const localEmail = localStorage.getItem('dnl_notif_email');
       const localLogo = localStorage.getItem('dnl_logo_url');
       const localKey = localStorage.getItem('dnl_email_api_key');
@@ -134,43 +124,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         logo_url: data?.logo_url || localLogo || '',
         email_api_key: localKey || ''
       });
-    } catch (error) {
-      console.warn("Usando apenas configurações locais devido a erro no banco.");
-    }
+    } catch (error) {}
   };
 
   const updateSettings = async (email: string, logoUrl?: string, emailApiKey?: string): Promise<boolean> => {
-    // 1. Salva SEMPRE localmente primeiro (Garante que funcione mesmo com erro de RLS no DB)
     localStorage.setItem('dnl_notif_email', email);
     if (logoUrl) localStorage.setItem('dnl_logo_url', logoUrl);
     if (emailApiKey) localStorage.setItem('dnl_email_api_key', emailApiKey);
 
-    const newSettings = {
+    setSettings({
       id: 'settings',
       notification_email: email,
       logo_url: logoUrl || settings?.logo_url || '',
       email_api_key: emailApiKey || localStorage.getItem('dnl_email_api_key') || ''
-    };
-
-    setSettings(newSettings);
+    });
 
     try {
-      // 2. Tenta salvar no Supabase (Apenas colunas que sabemos que existem e ignorando erro de RLS)
-      const { error } = await supabase
-        .from('app_settings')
-        .upsert({ 
-          notification_email: email, 
-          logo_url: logoUrl || (settings?.logo_url || null) 
-        });
-
-      if (error) {
-        console.warn("Aviso: Configurações salvas apenas no seu navegador (Erro RLS no Supabase). Isso é normal se o banco não estiver configurado para escrita pública.");
-      }
-    } catch (e) {
-      // Silencia erros de rede/DB para não travar a experiência do usuário
-    }
-
-    return true; // Retornamos true porque salvamos localmente com sucesso
+      await supabase.from('app_settings').upsert({ notification_email: email, logo_url: logoUrl || (settings?.logo_url || null) });
+    } catch (e) {}
+    return true;
   };
 
   const fetchProjects = async () => {
@@ -190,7 +162,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const fetchReviews = async (isAdmin: boolean) => {
-    const { data } = await supabase.from('reviews').select('*').order('date', { ascending: false });
+    // Se não for admin, pegamos apenas os aprovados. Se for admin, pegamos todos.
+    const query = supabase.from('reviews').select('*').order('date', { ascending: false });
+    if (!isAdmin) query.eq('approved', true);
+    
+    const { data } = await query;
     if (data) setReviews(data.map((r: any) => ({
       id: String(r.id),
       clientName: r.client_name,
@@ -200,6 +176,39 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       date: r.date,
       approved: r.approved
     })));
+  };
+
+  const addReview = async (review: Omit<Review, 'id' | 'approved'>): Promise<boolean> => {
+    try {
+      const { error } = await supabase.from('reviews').insert([{
+        client_name: review.clientName,
+        rating: review.rating,
+        comment: review.comment,
+        date: review.date,
+        avatar_url: review.avatarUrl,
+        approved: false
+      }]);
+
+      if (!error) {
+        const body = `NOVA AVALIAÇÃO RECEBIDA\n\nCliente: ${review.clientName}\nClassificação: ${review.rating} estrelas\nComentário: ${review.comment}\n\nAcesse o painel admin para aprovar.`;
+        await sendEmailViaWeb3Forms(`Novo Comentário: ${review.clientName}`, body);
+        fetchReviews(isAuthenticated);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      return false;
+    }
+  };
+
+  const deleteReview = async (id: string) => {
+    await supabase.from('reviews').delete().eq('id', id);
+    fetchReviews(true);
+  };
+
+  const toggleReviewApproval = async (id: string, currentStatus: boolean) => {
+    await supabase.from('reviews').update({ approved: !currentStatus }).eq('id', id);
+    fetchReviews(true);
   };
 
   const fetchBudgetRequests = async () => {
@@ -255,21 +264,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       if (!error) {
         const body = `NOVO ORÇAMENTO\n\nCliente: ${formData.name}\nTelemóvel: ${formData.phone}\nE-mail: ${formData.email}\nObra: ${formData.type}\n\nMensagem:\n${formData.description}`;
-        sendEmailViaWeb3Forms(`Novo Pedido: ${formData.name}`, body, formData.email);
+        await sendEmailViaWeb3Forms(`Novo Orçamento: ${formData.name}`, body, formData.email);
         return true;
       }
       return false;
     } catch (e) { return false; }
-  };
-
-  const deleteProject = async (id: string) => {
-    await supabase.from('projects').delete().eq('id', id);
-    fetchProjects();
-  };
-
-  const updateBudgetStatus = async (id: string, status: 'pendente' | 'contactado') => {
-    await supabase.from('budget_requests').update({ status }).eq('id', id);
-    fetchBudgetRequests();
   };
 
   const login = async (email: string, password: string) => {
@@ -279,23 +278,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const logout = async () => { await supabase.auth.signOut(); };
 
-  const sendTestEmail = async (email: string) => {
-    return await sendEmailViaWeb3Forms("DNL - Teste de Sistema", "Se você recebeu isto, seu sistema de e-mail está funcionando!", email);
-  };
-
   return (
     <AppContext.Provider value={{
-      projects, reviews, budgetRequests, settings, addProject, updateProject, deleteProject,
-      addReview: async (r) => {
-        const { error } = await supabase.from('reviews').insert([{ ...r, client_name: r.clientName, avatar_url: r.avatarUrl, approved: false }]);
-        return !error;
-      },
-      toggleReviewApproval: async (id, s) => { await supabase.from('reviews').update({ approved: !s }).eq('id', id); fetchReviews(true); },
-      deleteReview: async (id) => { await supabase.from('reviews').delete().eq('id', id); fetchReviews(true); },
+      projects, reviews, budgetRequests, settings, addProject, updateProject, deleteProject: async (id) => { await supabase.from('projects').delete().eq('id', id); fetchProjects(); },
+      addReview, toggleReviewApproval, deleteReview,
       createBudgetRequest,
       deleteBudgetRequest: async (id) => { await supabase.from('budget_requests').delete().eq('id', id); fetchBudgetRequests(); },
       deleteAllBudgetRequests: async () => { await supabase.from('budget_requests').delete().neq('id', '000'); fetchBudgetRequests(); },
-      updateBudgetStatus, updateSettings, uploadImage: uploadImageToStorage, sendTestEmail, isAuthenticated, login, logout, isLoading
+      updateBudgetStatus: async (id, status) => { await supabase.from('budget_requests').update({ status }).eq('id', id); fetchBudgetRequests(); },
+      updateSettings, uploadImage: uploadImageToStorage, sendTestEmail: async (e) => await sendEmailViaWeb3Forms("Teste", "Funcionando!", e),
+      isAuthenticated, login, logout, isLoading
     }}>
       {children}
     </AppContext.Provider>
