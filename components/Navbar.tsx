@@ -33,28 +33,27 @@ const Navbar: React.FC = () => {
     <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 border-b border-gray-200 bg-white ${
       scrolled 
         ? 'shadow-md py-0' 
-        : 'py-2 md:py-4'
+        : 'py-1 md:py-2'
     }`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className={`flex items-center justify-between transition-all duration-300 ${scrolled ? 'h-24' : 'h-28 md:h-36'}`}> 
-          <Link to="/" className="flex items-center group relative z-50 max-w-[220px] sm:max-w-[280px] md:max-w-none">
+        <div className={`flex items-center justify-between transition-all duration-300 ${scrolled ? 'h-20' : 'h-24 md:h-32'}`}> 
+          <Link to="/" className="flex items-center group relative z-50 max-w-[200px] sm:max-w-[260px] md:max-w-none">
             {settings?.logo_url ? (
                <img 
                  src={settings.logo_url} 
                  alt="DNL Logo" 
-                 className="h-16 sm:h-20 md:h-28 w-auto object-contain transition-all duration-300" 
+                 className="h-14 sm:h-18 md:h-24 w-auto object-contain transition-all duration-300" 
                />
             ) : (
-                /* Fallback Logo - Ajustado: Letras menores, logo visualmente maior via container */
+                /* Fallback Logo - Ajustado: Ligeiramente menor */
                 <div className="flex flex-col items-start leading-none transition-transform duration-300 transform origin-left">
                   <div className="flex items-center">
-                    <span className="text-2xl sm:text-3xl md:text-4xl font-['Montserrat'] font-extrabold tracking-tighter text-[#1F4E79] italic drop-shadow-sm">
+                    <span className="text-2xl sm:text-2xl md:text-3xl font-['Montserrat'] font-extrabold tracking-tighter text-[#1F4E79] italic drop-shadow-sm">
                       DNL
                     </span>
-                    {/* Acento Laranja (#FFA500) - Redimensionado proporcionalmente */}
-                    <div className="h-5 w-3 sm:h-6 sm:w-4 md:h-8 md:w-5 bg-[#FFA500] ml-1 skew-x-[-12deg] transform translate-y-[-1px] md:translate-y-[-2px]"></div>
+                    <div className="h-4 w-2.5 sm:h-5 sm:w-3 md:h-7 md:w-4 bg-[#FFA500] ml-1 skew-x-[-12deg] transform translate-y-[-1px] md:translate-y-[-2px]"></div>
                   </div>
-                  <span className="text-[7px] sm:text-[9px] md:text-[11px] font-['Montserrat'] font-bold tracking-[0.25em] text-[#333333] uppercase mt-0.5 ml-0.5">
+                  <span className="text-[6px] sm:text-[8px] md:text-[10px] font-['Montserrat'] font-bold tracking-[0.25em] text-[#333333] uppercase mt-0.5 ml-0.5">
                     Remodelações
                   </span>
                 </div>
@@ -68,7 +67,7 @@ const Navbar: React.FC = () => {
                 <Link
                   key={link.name}
                   to={link.path}
-                  className={`px-3 xl:px-4 py-2 rounded-lg text-base xl:text-lg font-['Montserrat'] font-semibold transition-all duration-300 tracking-wide ${
+                  className={`px-3 xl:px-4 py-2 rounded-lg text-sm xl:text-base font-['Montserrat'] font-semibold transition-all duration-300 tracking-wide ${
                     isActive(link.path)
                       ? 'text-[#FFA500] bg-[#1F4E79]/5 shadow-sm'
                       : 'text-[#333333] hover:text-[#1F4E79] hover:bg-gray-100'
@@ -79,13 +78,13 @@ const Navbar: React.FC = () => {
               ))}
               <Link 
                 to="/admin" 
-                className={`flex items-center px-3 py-2 rounded-lg text-lg font-['Montserrat'] font-semibold transition-all duration-300 ml-4 border border-gray-100 ${
+                className={`flex items-center px-3 py-2 rounded-lg text-base font-['Montserrat'] font-semibold transition-all duration-300 ml-4 border border-gray-100 ${
                   isActive('/admin') 
                     ? 'bg-gray-100 text-[#FFA500]' 
                     : 'text-gray-400 hover:bg-gray-50 hover:text-[#1F4E79]'
                 }`}
               >
-                <Lock size={18} />
+                <Lock size={16} />
               </Link>
             </div>
           </div>
@@ -102,7 +101,7 @@ const Navbar: React.FC = () => {
         </div>
       </div>
 
-      {/* Mobile Menu - Solid White */}
+      {/* Mobile Menu */}
       {isOpen && (
         <div className="lg:hidden absolute top-full left-0 w-full bg-white border-b border-gray-200 shadow-xl animate-fade-in-down">
           <div className="px-4 pt-4 pb-8 space-y-2">
