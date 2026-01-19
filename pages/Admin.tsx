@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { Project, ProjectStatus, ProjectType, GalleryItem } from '../types';
-import { Trash2, Edit, Plus, Star, LogOut, Check, Info, Upload, Image as ImageIcon, AlertCircle, Settings, Save, Loader2, MessageSquare, ShieldAlert, FolderKanban, FileText } from 'lucide-react';
+import { Trash2, Edit, Plus, Star, LogOut, Check, Info, Upload, Image as ImageIcon, AlertCircle, Settings, Save, Loader2, MessageSquare, ShieldAlert, FolderKanban, FileText, Eye, EyeOff } from 'lucide-react';
 
 const Admin: React.FC = () => {
   const { isAuthenticated, login, logout, projects, addProject, updateProject, deleteProject, reviews, toggleReviewApproval, deleteReview, budgetRequests, deleteBudgetRequest, deleteAllBudgetRequests, updateBudgetStatus, settings, updateSettings, uploadImage, sendTestEmail, isLoading } = useApp();
@@ -18,6 +18,8 @@ const Admin: React.FC = () => {
   // Settings State
   const [notificationEmail, setNotificationEmail] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
+  const [emailApiKey, setEmailApiKey] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
 
@@ -25,6 +27,7 @@ const Admin: React.FC = () => {
     if (settings) {
       setNotificationEmail(settings.notification_email || '');
       setLogoUrl(settings.logo_url || '');
+      setEmailApiKey(settings.email_api_key || '');
     }
   }, [settings]);
 
@@ -49,7 +52,6 @@ const Admin: React.FC = () => {
     gallery: []
   });
 
-  // Helper to convert file to base64 for PREVIEW ONLY
   const convertFileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -153,7 +155,7 @@ const Admin: React.FC = () => {
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingSettings(true);
-    const success = await updateSettings(notificationEmail, logoUrl);
+    const success = await updateSettings(notificationEmail, logoUrl, emailApiKey);
     if (success) {
       alert("Configurações atualizadas com sucesso!");
     } else {
@@ -166,9 +168,9 @@ const Admin: React.FC = () => {
     setIsSendingTest(true);
     const success = await sendTestEmail(notificationEmail);
     if (success) {
-      alert(`Email de teste enviado. Verifique a caixa de entrada.`);
+      alert(`Email de teste enviado com sucesso para ${notificationEmail}. Verifique a caixa de entrada (incluindo spam).`);
     } else {
-      alert("Erro ao enviar email de teste.");
+      alert("Erro ao enviar email de teste. Verifique se a Access Key está correta.");
     }
     setIsSendingTest(false);
   };
@@ -266,7 +268,6 @@ const Admin: React.FC = () => {
     );
   }
 
-  // --- LOGIN SCREEN ---
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#F5F5F5] px-4 pt-28">
@@ -326,7 +327,6 @@ const Admin: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#F5F5F5] flex flex-col md:flex-row font-['Open_Sans'] pt-28 lg:pt-32">
       
-      {/* Sidebar Navigation */}
       <aside className="w-full md:w-72 bg-[#1F4E79] text-white flex flex-col shadow-2xl z-20">
         <div className="p-6 border-b border-white/10">
              {settings?.logo_url ? (
@@ -375,19 +375,15 @@ const Admin: React.FC = () => {
         </div>
       </aside>
 
-      {/* Main Content Area */}
       <main className="flex-1 p-4 md:p-8 overflow-x-hidden">
         
         {activeTab === 'projects' && (
           <div className="flex flex-col gap-8 max-w-7xl mx-auto">
-            
-            {/* Form */}
             <div className="bg-white p-6 md:p-8 rounded-xl shadow-md border border-gray-200">
                <h2 className="text-2xl font-['Oswald'] font-bold mb-6 text-[#333333] flex items-center">
                   {isEditing ? <Edit className="mr-2 text-[#FFA500]" /> : <Plus className="mr-2 text-[#FFA500]" />}
                   {isEditing ? 'Editar Projeto' : 'Adicionar Nova Obra'}
                </h2>
-               
                <form onSubmit={handleSubmit} className="space-y-6">
                  <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
                     <div className="md:col-span-3">
@@ -407,7 +403,6 @@ const Admin: React.FC = () => {
                          <input type="file" accept="image/*" onChange={handleMainImageUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" disabled={!!formData.imageUrl} />
                        </div>
                     </div>
-
                     <div className="md:col-span-9 grid grid-cols-1 md:grid-cols-2 gap-4">
                        <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-1">Título da Obra</label>
@@ -427,12 +422,10 @@ const Admin: React.FC = () => {
                        </div>
                     </div>
                  </div>
-
                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Descrição Detalhada</label>
                     <textarea required name="description" value={formData.description} onChange={handleInputChange} rows={3} className="w-full border rounded-lg p-3 outline-none focus:border-[#1F4E79]" placeholder="Descreva os detalhes da obra..." />
                  </div>
-
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-gray-50 p-4 rounded-lg">
                     <div>
                        <label className="block text-sm font-medium text-gray-700 mb-1">Data de Início</label>
@@ -447,26 +440,22 @@ const Admin: React.FC = () => {
                        <input type="range" name="progress" min="0" max="100" value={formData.progress} onChange={handleInputChange} className="w-full accent-[#FFA500] h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer mt-3" />
                     </div>
                  </div>
-
                  <div>
                      <label className="block text-sm font-bold text-gray-700 mb-3">Galeria de Fotos</label>
                      <div className="flex gap-4 overflow-x-auto pb-4">
                         <div className="flex-shrink-0 w-32 h-32 border-2 border-dashed border-gray-300 rounded-lg hover:bg-gray-50 flex flex-col items-center justify-center cursor-pointer relative">
                            <Plus className="h-8 w-8 text-gray-400 mb-1" />
-                           <span className="text-xs text-gray-500">Adicionar</span>
                            <input type="file" accept="image/*" multiple onChange={handleGalleryImageUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
                         </div>
-
                         {formData.gallery?.map((item, idx) => (
                            <div key={idx} className="flex-shrink-0 w-48 relative group">
                               <img src={item.url} alt="Gallery" className="w-full h-32 object-cover rounded-lg border" />
-                              <button type="button" onClick={() => removeGalleryImage(idx)} className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"><Trash2 size={12} /></button>
+                              <button type="button" onClick={() => removeGalleryImage(idx)} className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full shadow-sm"><Trash2 size={12} /></button>
                               <input type="text" placeholder="Legenda..." value={item.caption} onChange={(e) => updateGalleryCaption(idx, e.target.value)} className="w-full text-xs border rounded p-1 mt-1 outline-none" />
                            </div>
                         ))}
                      </div>
                  </div>
-
                  <div className="flex justify-end gap-3 pt-4">
                     {isEditing && <button type="button" onClick={resetForm} className="px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-100 font-semibold transition-colors">Cancelar</button>}
                     <button type="submit" disabled={isSubmittingProject} className="px-8 py-3 bg-[#FFA500] text-white rounded-lg hover:bg-[#e59400] font-bold shadow-md flex items-center">
@@ -476,8 +465,6 @@ const Admin: React.FC = () => {
                  </div>
                </form>
             </div>
-
-            {/* List */}
             <div>
                <h3 className="text-xl font-['Oswald'] font-bold text-[#333333] mb-4 flex items-center border-b pb-2">
                   <FolderKanban className="mr-2 text-[#1F4E79]" /> Obras Registradas
@@ -497,16 +484,15 @@ const Admin: React.FC = () => {
                                  <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${project.status === ProjectStatus.COMPLETED ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>{project.status}</span>
                               </div>
                               <p className="text-sm text-gray-500 font-semibold mb-1">{project.type}</p>
-                              <p className="text-sm text-gray-600 line-clamp-2 mb-3">{project.description}</p>
                               <div className="w-full bg-gray-100 rounded-full h-1.5 mb-1">
                                  <div className="bg-[#1F4E79] h-1.5 rounded-full" style={{width: `${project.progress}%`}}></div>
                               </div>
                            </div>
                            <div className="flex gap-2">
-                              <button onClick={() => startEdit(project)} className="flex items-center px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors border border-blue-200">
+                              <button onClick={() => startEdit(project)} className="flex items-center px-4 py-2 bg-blue-50 text-blue-600 rounded-lg border border-blue-200">
                                  <Edit size={16} className="mr-2" /> Editar
                               </button>
-                              <button onClick={(e) => deleteProjectDirectly(project.id, e)} className="flex items-center px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors border border-red-200">
+                              <button onClick={(e) => deleteProjectDirectly(project.id, e)} className="flex items-center px-4 py-2 bg-red-50 text-red-600 rounded-lg border border-red-200">
                                  <Trash2 size={16} className="mr-2" /> Excluir
                               </button>
                            </div>
@@ -518,7 +504,6 @@ const Admin: React.FC = () => {
           </div>
         )}
 
-        {/* --- REVIEWS TAB --- */}
         {activeTab === 'reviews' && (
           <div className="space-y-8 max-w-5xl mx-auto">
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 shadow-md">
@@ -553,10 +538,9 @@ const Admin: React.FC = () => {
                 </div>
               )}
             </div>
-
             <div className="bg-white rounded-lg p-6 shadow-md border border-gray-200">
                <h2 className="text-xl font-['Oswald'] font-bold text-[#333333] mb-4 flex items-center">
-                <MessageSquare className="mr-2" /> Histórico de Avaliações Publicadas
+                <MessageSquare className="mr-2" /> Histórico de Avaliações
               </h2>
               <div className="space-y-4">
                 {approvedReviews.map(review => (
@@ -576,28 +560,23 @@ const Admin: React.FC = () => {
           </div>
         )}
 
-        {/* Requests Tab */}
         {activeTab === 'requests' && (
            <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200 max-w-5xl mx-auto">
              <div className="flex justify-between items-center mb-6">
                 <h2 className="text-xl font-['Oswald'] font-bold flex items-center"><FileText className="mr-2" /> Solicitações de Orçamento</h2>
                 {budgetRequests.length > 0 && (
-                  <button 
-                    onClick={handleClearAllRequests}
-                    className="flex items-center px-4 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors text-sm font-bold border border-red-200 shadow-sm"
-                  >
-                    <Trash2 size={16} className="mr-2" /> Limpar Todas as Solicitações
+                  <button onClick={handleClearAllRequests} className="flex items-center px-4 py-2 bg-red-100 text-red-600 rounded-lg text-sm font-bold border border-red-200 shadow-sm">
+                    <Trash2 size={16} className="mr-2" /> Limpar Todas
                   </button>
                 )}
              </div>
-
              {budgetRequests.length === 0 ? <p className="text-gray-500">Nenhuma solicitação pendente.</p> : (
                <div className="overflow-x-auto rounded-lg border border-gray-200">
                    <table className="min-w-full divide-y divide-gray-200">
                      <thead className="bg-gray-50">
                        <tr>
                          <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">Data</th>
-                         <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">Cliente / Contato</th>
+                         <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">Cliente</th>
                          <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">Obra</th>
                          <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">Status</th>
                          <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase">Ações</th>
@@ -605,10 +584,8 @@ const Admin: React.FC = () => {
                      </thead>
                      <tbody className="bg-white divide-y divide-gray-200">
                        {budgetRequests.map(req => (
-                         <tr key={req.id} className={`hover:bg-gray-50 transition-colors ${req.status === 'pendente' ? 'bg-amber-50/30' : ''}`}>
-                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                             {new Date(req.created_at).toLocaleDateString()}
-                           </td>
+                         <tr key={req.id} className={`hover:bg-gray-50 ${req.status === 'pendente' ? 'bg-amber-50/30' : ''}`}>
+                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{new Date(req.created_at).toLocaleDateString()}</td>
                            <td className="px-6 py-4">
                              <div className="text-sm font-bold text-gray-900">{req.name}</div>
                              <div className="text-xs text-gray-500">{req.email}</div>
@@ -616,33 +593,16 @@ const Admin: React.FC = () => {
                            </td>
                            <td className="px-6 py-4">
                              <div className="text-sm font-bold text-[#1F4E79]">{req.type}</div>
-                             <p className="text-xs text-gray-500 mt-1 line-clamp-1" title={req.description}>{req.description}</p>
                            </td>
                            <td className="px-6 py-4 whitespace-nowrap">
-                             <span className={`px-3 py-1 inline-flex text-xs leading-5 font-bold rounded-full ${
-                               req.status === 'pendente' ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-green-100 text-green-800 border border-green-200'
-                             }`}>
+                             <span className={`px-3 py-1 text-xs font-bold rounded-full ${req.status === 'pendente' ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'}`}>
                                {req.status === 'pendente' ? 'Pendente' : 'Contactado'}
                              </span>
                            </td>
                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                              <div className="flex justify-end items-center gap-3">
-                               {req.status === 'pendente' && (
-                                 <button 
-                                   onClick={() => updateBudgetStatus(req.id, 'contactado')}
-                                   className="text-green-600 hover:text-green-800 flex items-center gap-1 font-bold"
-                                   title="Marcar como Contactado"
-                                 >
-                                   <Check size={18} /> <span className="hidden lg:inline">Concluir</span>
-                                 </button>
-                               )}
-                               <button 
-                                  onClick={(e) => confirmAndDeleteRequest(req.id, e)} 
-                                  className="text-red-500 hover:text-red-700 p-2 rounded-lg hover:bg-red-50 transition-colors"
-                                  title="Excluir Solicitação"
-                               >
-                                  <Trash2 size={20} />
-                               </button>
+                               {req.status === 'pendente' && <button onClick={() => updateBudgetStatus(req.id, 'contactado')} className="text-green-600 hover:text-green-800 font-bold"><Check size={18} /></button>}
+                               <button onClick={(e) => confirmAndDeleteRequest(req.id, e)} className="text-red-500 p-2"><Trash2 size={20} /></button>
                              </div>
                            </td>
                          </tr>
@@ -657,7 +617,6 @@ const Admin: React.FC = () => {
         {activeTab === 'settings' && (
            <div className="bg-white p-8 rounded-lg shadow-md max-w-2xl mx-auto border border-gray-200">
               <h2 className="text-xl font-['Oswald'] font-bold mb-6 flex items-center"><Settings className="mr-2" /> Configurações Gerais</h2>
-              
               <form onSubmit={handleSaveSettings} className="space-y-6">
                 <div className="bg-[#F5F5F5] p-4 rounded-lg border border-gray-200">
                    <label className="block text-sm font-bold text-gray-700 mb-2">Logotipo do Site</label>
@@ -677,12 +636,37 @@ const Admin: React.FC = () => {
 
                 <div>
                    <label className="block text-sm font-medium text-gray-700 mb-1">E-mail para Notificações</label>
-                   <input type="email" value={notificationEmail} onChange={(e) => setNotificationEmail(e.target.value)} className="w-full border rounded-lg px-4 py-2 outline-none" required />
+                   <input type="email" value={notificationEmail} onChange={(e) => setNotificationEmail(e.target.value)} className="w-full border rounded-lg px-4 py-2 outline-none" required placeholder="exemplo@dnlremodelacoes.pt" />
+                   <p className="text-xs text-gray-400 mt-1">Este e-mail receberá os avisos de novos orçamentos.</p>
+                </div>
+
+                <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                   <div className="flex items-center justify-between mb-2">
+                      <label className="block text-sm font-bold text-[#1F4E79]">Web3Forms Access Key</label>
+                      <button type="button" onClick={() => setShowApiKey(!showApiKey)} className="text-[#1F4E79] hover:text-[#FFA500]">
+                         {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                   </div>
+                   <input 
+                     type={showApiKey ? "text" : "password"} 
+                     value={emailApiKey} 
+                     onChange={(e) => setEmailApiKey(e.target.value)} 
+                     className="w-full border rounded-lg px-4 py-2 outline-none bg-white text-sm" 
+                     placeholder="Cole aqui sua chave de acesso"
+                   />
+                   <p className="text-[10px] text-gray-500 mt-2 font-['Open_Sans']">
+                      Obtenha sua chave gratuita em <a href="https://web3forms.com/" target="_blank" className="text-blue-600 underline">web3forms.com</a> para habilitar o envio de e-mails.
+                   </p>
                 </div>
                 
-                <div className="pt-4 border-t border-gray-100 flex gap-4">
-                  <button type="submit" disabled={isSavingSettings} className="flex-1 bg-[#1F4E79] text-white px-6 py-2 rounded-lg font-semibold hover:bg-[#153a5b] transition-colors">{isSavingSettings ? 'Salvando...' : 'Salvar Alterações'}</button>
-                  <button type="button" onClick={handleTestEmail} disabled={isSendingTest || !notificationEmail} className="bg-gray-200 text-gray-800 px-6 py-2 rounded-lg font-semibold hover:bg-gray-300 transition-colors">Testar Email</button>
+                <div className="pt-4 border-t border-gray-100 flex flex-col sm:flex-row gap-4">
+                  <button type="submit" disabled={isSavingSettings} className="flex-1 bg-[#1F4E79] text-white px-6 py-2 rounded-lg font-semibold hover:bg-[#153a5b] transition-colors flex justify-center items-center">
+                    {isSavingSettings ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <Save className="mr-2" size={18} />}
+                    Salvar Alterações
+                  </button>
+                  <button type="button" onClick={handleTestEmail} disabled={isSendingTest || !emailApiKey} className="bg-gray-200 text-gray-800 px-6 py-2 rounded-lg font-semibold hover:bg-gray-300 transition-colors flex justify-center items-center">
+                    {isSendingTest ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : "Testar E-mail"}
+                  </button>
                 </div>
               </form>
            </div>

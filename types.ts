@@ -64,4 +64,5 @@ export interface AppSettings {
   id: string;
   notification_email: string;
   logo_url?: string;
+  email_api_key?: string;
 }

@@ -2,9 +2,6 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { Project, Review, ProjectStatus, ContactForm, BudgetRequest, AppSettings, GalleryItem } from '../types';
 import { supabase } from '../services/supabaseClient';
 
-// Chave de Acesso Web3Forms
-const WEB3FORMS_ACCESS_KEY = 'f25537fd-c9fc-4583-af3b-1899643fbbf8';
-
 interface LoginResult {
   success: boolean;
   error?: string;
@@ -25,7 +22,7 @@ interface AppContextType {
   deleteBudgetRequest: (id: string) => Promise<void>;
   deleteAllBudgetRequests: () => Promise<void>;
   updateBudgetStatus: (id: string, status: 'pendente' | 'contactado') => Promise<void>;
-  updateSettings: (email: string, logoUrl?: string) => Promise<boolean>;
+  updateSettings: (email: string, logoUrl?: string, emailApiKey?: string) => Promise<boolean>;
   uploadImage: (file: File) => Promise<string | null>;
   sendTestEmail: (email: string) => Promise<boolean>;
   isAuthenticated: boolean;
@@ -73,6 +70,41 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return () => subscription.unsubscribe();
   }, []);
 
+  const sendEmailViaWeb3Forms = async (subject: string, content: string, toEmail?: string): Promise<boolean> => {
+    // Busca a chave: primeiro no settings (DB), depois no LocalStorage
+    const localKey = localStorage.getItem('dnl_email_api_key');
+    const accessKey = settings?.email_api_key || localKey;
+    const targetEmail = toEmail || settings?.notification_email;
+
+    if (!accessKey || accessKey.trim() === '') {
+      console.warn("Web3Forms Access Key não configurada. E-mail não enviado.");
+      return false;
+    }
+
+    try {
+      const response = await fetch("https://api.web3forms.com/submit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          access_key: accessKey,
+          subject: subject,
+          from_name: "DNL Remodelações - Sistema",
+          to_email: targetEmail,
+          message: content,
+        }),
+      });
+
+      const result = await response.json();
+      return result.success;
+    } catch (error) {
+      console.error("Erro ao enviar e-mail via Web3Forms:", error);
+      return false;
+    }
+  };
+
   const uploadImageToStorage = async (file: File, bucket: string = 'siteDNL'): Promise<string | null> => {
     try {
       const cleanFileName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
@@ -90,24 +122,87 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const fetchSettings = async () => {
     try {
-      const { data, error } = await supabase.from('app_settings').select('*').single();
-      if (data) setSettings(data);
-      else if (!error || error.code === 'PGRST116') {
-        const { data: newData } = await supabase.from('app_settings').insert([{ notification_email: 'mauricio.junior@ecletika.com' }]).select().single();
-        if (newData) setSettings(newData);
+      const { data, error } = await supabase.from('app_settings').select('*').limit(1).single();
+      const localKey = localStorage.getItem('dnl_email_api_key');
+      
+      if (data) {
+        // Mescla dados do DB com chave local caso a coluna do DB esteja vazia
+        setSettings({
+          ...data,
+          email_api_key: data.email_api_key || localKey || ''
+        });
+      } else if (localKey) {
+        // Se não houver nada no DB mas houver localmente
+        setSettings({
+          id: 'local',
+          notification_email: 'contacto@dnlremodelacoes.pt',
+          email_api_key: localKey
+        });
       }
-    } catch (error) {}
+    } catch (error) {
+      console.error("Erro ao buscar configurações:", error);
+    }
   };
 
-  const updateSettings = async (email: string, logoUrl?: string): Promise<boolean> => {
+  const updateSettings = async (email: string, logoUrl?: string, emailApiKey?: string): Promise<boolean> => {
     try {
-      const updates: any = { notification_email: email };
-      if (logoUrl !== undefined) updates.logo_url = logoUrl;
-      const { error } = await supabase.from('app_settings').update(updates).eq('id', settings?.id);
-      if (error) throw error;
-      setSettings(prev => prev ? { ...prev, ...updates } : null);
+      // Salva a chave no LocalStorage sempre como garantia (fallback para o erro PGRST204)
+      if (emailApiKey) {
+        localStorage.setItem('dnl_email_api_key', emailApiKey);
+      }
+
+      // Tenta salvar no Supabase as colunas que sabemos que existem
+      const baseUpdates: any = { 
+        notification_email: email,
+        logo_url: logoUrl || (settings?.logo_url || null)
+      };
+
+      // Tenta incluir a chave, mas se falhar vamos tratar abaixo
+      const fullUpdates = { ...baseUpdates, email_api_key: emailApiKey || (settings?.email_api_key || null) };
+
+      if (settings?.id && settings.id !== 'local') {
+        fullUpdates.id = settings.id;
+      }
+
+      // 1. Tentativa Completa (Com a coluna de API Key)
+      const { data, error } = await supabase
+        .from('app_settings')
+        .upsert(fullUpdates)
+        .select()
+        .single();
+
+      if (error) {
+        // Se o erro for especificamente sobre a coluna inexistente (PGRST204)
+        if (error.code === 'PGRST204' || error.message.includes('email_api_key')) {
+          console.warn("Coluna 'email_api_key' ausente no DB. Salvando apenas localmente.");
+          
+          // 2. Segunda Tentativa: Salvar apenas o que o banco aceita
+          const { data: retryData, error: retryError } = await supabase
+            .from('app_settings')
+            .upsert(baseUpdates)
+            .select()
+            .single();
+            
+          if (!retryError && retryData) {
+            setSettings({ ...retryData, email_api_key: emailApiKey || '' });
+            return true;
+          }
+          throw retryError;
+        }
+        throw error;
+      }
+
+      if (data) {
+        setSettings(data);
+      }
       return true;
     } catch (error) {
+      console.error("Erro ao atualizar configurações:", error);
+      // Se chegamos aqui mas o emailApiKey foi salvo no localStorage, ainda podemos considerar sucesso parcial
+      if (emailApiKey) {
+        setSettings(prev => prev ? { ...prev, notification_email: email, logo_url: logoUrl || prev.logo_url, email_api_key: emailApiKey } : null);
+        return true;
+      }
       return false;
     }
   };
@@ -229,7 +324,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         description: formData.description,
         status: 'pendente'
       }]);
-      return !error;
+
+      if (!error) {
+        const emailBody = `
+          Novo Pedido de Orçamento Recebido!
+          
+          Nome: ${formData.name}
+          E-mail: ${formData.email}
+          Telefone: ${formData.phone}
+          Tipo de Obra: ${formData.type}
+          
+          Descrição:
+          ${formData.description}
+          
+          Acesse o painel administrativo para gerir esta solicitação.
+        `;
+        
+        sendEmailViaWeb3Forms(`Novo Orçamento: ${formData.name}`, emailBody).then(sent => {
+          if (!sent) console.warn("Aviso: Notificação por e-mail falhou (verifique a Access Key nas configurações).");
+        });
+        
+        return true;
+      }
+      return false;
     } catch (error) {
       return false;
     }
@@ -238,31 +355,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const deleteBudgetRequest = async (id: string) => {
     try {
       const { error } = await supabase.from('budget_requests').delete().eq('id', id);
-      if (error) {
-         console.error("Erro deleteBudgetRequest:", error);
-         alert(`Não foi possível apagar esta solicitação: ${error.message}. Certifique-se de que tem permissões de DELETE na tabela budget_requests.`);
-         return;
-      }
+      if (error) throw error;
       setBudgetRequests(prev => prev.filter(r => r.id !== id));
     } catch (error) {
-      alert("Erro ao processar exclusão.");
+      alert("Erro ao excluir solicitação.");
     }
   };
 
   const deleteAllBudgetRequests = async () => {
     try {
-      // Deleta todos os registros onde o ID não é nulo. 
-      // Se não funcionar, verifique se a tabela budget_requests permite exclusão no Supabase Dashboard (RLS Policies).
       const { error } = await supabase.from('budget_requests').delete().filter('id', 'neq', '00000000-0000-0000-0000-000000000000');
-      
-      if (error) {
-        console.error("Erro crítico ao limpar solicitações:", error);
-        alert(`Erro do banco de dados ao limpar: ${error.message}. Verifique as políticas de RLS no Supabase.`);
-        return;
-      }
-      
+      if (error) throw error;
       setBudgetRequests([]);
-      alert("Todas as solicitações foram removidas com sucesso.");
+      alert("Todas as solicitações foram removidas.");
     } catch (error) {
       alert("Erro ao processar exclusão em massa.");
     }
@@ -294,13 +399,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const sendTestEmail = async (email: string) => {
-    return true; 
+    return await sendEmailViaWeb3Forms(
+      "Teste de Configuração DNL", 
+      "Este é um e-mail de teste para validar sua Web3Forms Access Key configurada no painel administrativo.",
+      email
+    );
+  };
+
+  const addReview = async (review: Omit<Review, 'id' | 'approved'>): Promise<boolean> => {
+    try {
+      const { error } = await supabase.from('reviews').insert([{
+        client_name: review.clientName,
+        rating: review.rating,
+        comment: review.comment,
+        date: review.date,
+        avatar_url: review.avatarUrl,
+        approved: false
+      }]);
+      return !error;
+    } catch (error) {
+      return false;
+    }
   };
 
   return (
     <AppContext.Provider value={{
       projects, reviews, budgetRequests, settings, addProject, updateProject, deleteProject,
-      addReview: async () => true, toggleReviewApproval, deleteReview, createBudgetRequest,
+      addReview, toggleReviewApproval, deleteReview, createBudgetRequest,
       deleteBudgetRequest, deleteAllBudgetRequests, updateBudgetStatus, updateSettings,
       uploadImage: uploadImageToStorage, sendTestEmail, isAuthenticated, login, logout, isLoading
     }}>
