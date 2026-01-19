@@ -41,47 +41,47 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  // Carrega configurações iniciais (Local + DB)
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    const init = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
       setIsAuthenticated(!!session);
-      fetchProjects();
-      fetchReviews(!!session); 
-      fetchSettings();
+      
+      await fetchProjects();
+      await fetchReviews(!!session); 
+      await fetchSettings();
+      
       if (session) {
-        fetchBudgetRequests();
+        await fetchBudgetRequests();
       }
-      setIsLoading(false); 
-    });
+      setIsLoading(false);
+    };
+    
+    init();
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const isAuth = !!session;
       setIsAuthenticated(isAuth);
       fetchProjects();
       fetchReviews(isAuth); 
-      if (isAuth) {
-        fetchBudgetRequests();
-      } else {
-        setBudgetRequests([]); 
-      }
+      if (isAuth) fetchBudgetRequests();
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  const sendEmailViaWeb3Forms = async (subject: string, content: string, toEmail?: string): Promise<boolean> => {
-    // Busca a chave: primeiro no settings (DB), depois no LocalStorage
-    const localKey = localStorage.getItem('dnl_email_api_key');
-    const accessKey = settings?.email_api_key || localKey;
-    const targetEmail = toEmail || settings?.notification_email;
+  const sendEmailViaWeb3Forms = async (subject: string, content: string, clientEmail?: string): Promise<boolean> => {
+    // Busca a chave local ou do DB
+    const accessKey = localStorage.getItem('dnl_email_api_key') || settings?.email_api_key;
 
     if (!accessKey || accessKey.trim() === '') {
-      console.warn("Web3Forms Access Key não configurada. E-mail não enviado.");
+      console.error("Web3Forms Access Key não encontrada.");
       return false;
     }
 
     try {
+      // Nota: No plano Free do Web3Forms, o email sempre vai para o endereço cadastrado na chave.
+      // O campo 'email' abaixo define o 'Reply-To' para você poder responder ao cliente.
       const response = await fetch("https://api.web3forms.com/submit", {
         method: "POST",
         headers: {
@@ -91,8 +91,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         body: JSON.stringify({
           access_key: accessKey,
           subject: subject,
-          from_name: "DNL Remodelações - Sistema",
-          to_email: targetEmail,
+          from_name: "DNL Site",
+          email: clientEmail || "contacto@dnlremodelacoes.pt",
           message: content,
         }),
       });
@@ -100,334 +100,202 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const result = await response.json();
       return result.success;
     } catch (error) {
-      console.error("Erro ao enviar e-mail via Web3Forms:", error);
+      console.error("Erro ao disparar API de e-mail:", error);
       return false;
     }
   };
 
-  const uploadImageToStorage = async (file: File, bucket: string = 'siteDNL'): Promise<string | null> => {
+  const uploadImageToStorage = async (file: File): Promise<string | null> => {
     try {
-      const cleanFileName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
-      const fileExt = cleanFileName.split('.').pop();
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
-      const filePath = `${fileName}`;
-      const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, file);
-      if (uploadError) return null;
-      const { data } = supabase.storage.from(bucket).getPublicUrl(filePath);
+      const fileName = `${Date.now()}-${file.name.replace(/[^a-z0-9.]/gi, '_')}`;
+      const { error: uploadError } = await supabase.storage.from('siteDNL').upload(fileName, file);
+      if (uploadError) throw uploadError;
+      const { data } = supabase.storage.from('siteDNL').getPublicUrl(fileName);
       return data.publicUrl;
     } catch (error) {
+      console.error("Erro no upload de imagem:", error);
       return null;
     }
   };
 
   const fetchSettings = async () => {
     try {
-      const { data, error } = await supabase.from('app_settings').select('*').limit(1).single();
-      const localKey = localStorage.getItem('dnl_email_api_key');
+      // 1. Tenta buscar do Supabase
+      const { data } = await supabase.from('app_settings').select('notification_email, logo_url').limit(1).maybeSingle();
       
-      if (data) {
-        // Mescla dados do DB com chave local caso a coluna do DB esteja vazia
-        setSettings({
-          ...data,
-          email_api_key: data.email_api_key || localKey || ''
-        });
-      } else if (localKey) {
-        // Se não houver nada no DB mas houver localmente
-        setSettings({
-          id: 'local',
-          notification_email: 'contacto@dnlremodelacoes.pt',
-          email_api_key: localKey
-        });
-      }
+      // 2. Busca o que está salvo localmente (Fallback)
+      const localEmail = localStorage.getItem('dnl_notif_email');
+      const localLogo = localStorage.getItem('dnl_logo_url');
+      const localKey = localStorage.getItem('dnl_email_api_key');
+
+      setSettings({
+        id: 'settings',
+        notification_email: data?.notification_email || localEmail || 'contacto@dnlremodelacoes.pt',
+        logo_url: data?.logo_url || localLogo || '',
+        email_api_key: localKey || ''
+      });
     } catch (error) {
-      console.error("Erro ao buscar configurações:", error);
+      console.warn("Usando apenas configurações locais devido a erro no banco.");
     }
   };
 
   const updateSettings = async (email: string, logoUrl?: string, emailApiKey?: string): Promise<boolean> => {
+    // 1. Salva SEMPRE localmente primeiro (Garante que funcione mesmo com erro de RLS no DB)
+    localStorage.setItem('dnl_notif_email', email);
+    if (logoUrl) localStorage.setItem('dnl_logo_url', logoUrl);
+    if (emailApiKey) localStorage.setItem('dnl_email_api_key', emailApiKey);
+
+    const newSettings = {
+      id: 'settings',
+      notification_email: email,
+      logo_url: logoUrl || settings?.logo_url || '',
+      email_api_key: emailApiKey || localStorage.getItem('dnl_email_api_key') || ''
+    };
+
+    setSettings(newSettings);
+
     try {
-      // Salva a chave no LocalStorage sempre como garantia (fallback para o erro PGRST204)
-      if (emailApiKey) {
-        localStorage.setItem('dnl_email_api_key', emailApiKey);
-      }
-
-      // Tenta salvar no Supabase as colunas que sabemos que existem
-      const baseUpdates: any = { 
-        notification_email: email,
-        logo_url: logoUrl || (settings?.logo_url || null)
-      };
-
-      // Tenta incluir a chave, mas se falhar vamos tratar abaixo
-      const fullUpdates = { ...baseUpdates, email_api_key: emailApiKey || (settings?.email_api_key || null) };
-
-      if (settings?.id && settings.id !== 'local') {
-        fullUpdates.id = settings.id;
-      }
-
-      // 1. Tentativa Completa (Com a coluna de API Key)
-      const { data, error } = await supabase
+      // 2. Tenta salvar no Supabase (Apenas colunas que sabemos que existem e ignorando erro de RLS)
+      const { error } = await supabase
         .from('app_settings')
-        .upsert(fullUpdates)
-        .select()
-        .single();
+        .upsert({ 
+          notification_email: email, 
+          logo_url: logoUrl || (settings?.logo_url || null) 
+        });
 
       if (error) {
-        // Se o erro for especificamente sobre a coluna inexistente (PGRST204)
-        if (error.code === 'PGRST204' || error.message.includes('email_api_key')) {
-          console.warn("Coluna 'email_api_key' ausente no DB. Salvando apenas localmente.");
-          
-          // 2. Segunda Tentativa: Salvar apenas o que o banco aceita
-          const { data: retryData, error: retryError } = await supabase
-            .from('app_settings')
-            .upsert(baseUpdates)
-            .select()
-            .single();
-            
-          if (!retryError && retryData) {
-            setSettings({ ...retryData, email_api_key: emailApiKey || '' });
-            return true;
-          }
-          throw retryError;
-        }
-        throw error;
+        console.warn("Aviso: Configurações salvas apenas no seu navegador (Erro RLS no Supabase). Isso é normal se o banco não estiver configurado para escrita pública.");
       }
-
-      if (data) {
-        setSettings(data);
-      }
-      return true;
-    } catch (error) {
-      console.error("Erro ao atualizar configurações:", error);
-      // Se chegamos aqui mas o emailApiKey foi salvo no localStorage, ainda podemos considerar sucesso parcial
-      if (emailApiKey) {
-        setSettings(prev => prev ? { ...prev, notification_email: email, logo_url: logoUrl || prev.logo_url, email_api_key: emailApiKey } : null);
-        return true;
-      }
-      return false;
+    } catch (e) {
+      // Silencia erros de rede/DB para não travar a experiência do usuário
     }
+
+    return true; // Retornamos true porque salvamos localmente com sucesso
   };
 
   const fetchProjects = async () => {
-    try {
-      const { data, error } = await supabase.from('projects').select('*').order('created_at', { ascending: false });
-      if (data) {
-        setProjects(data.map((p: any) => ({
-          id: String(p.id),
-          title: p.title,
-          description: p.description,
-          type: p.type,
-          status: p.status,
-          imageUrl: p.image_url,
-          progress: p.progress,
-          completionDate: p.completion_date,
-          startDate: p.start_date,
-          gallery: p.gallery || []
-        })));
-      }
-    } catch (error) {}
+    const { data } = await supabase.from('projects').select('*').order('created_at', { ascending: false });
+    if (data) setProjects(data.map((p: any) => ({
+      id: String(p.id),
+      title: p.title,
+      description: p.description,
+      type: p.type,
+      status: p.status,
+      imageUrl: p.image_url,
+      progress: p.progress,
+      completionDate: p.completion_date,
+      startDate: p.start_date,
+      gallery: p.gallery || []
+    })));
   };
 
   const fetchReviews = async (isAdmin: boolean) => {
-    try {
-      const { data } = await supabase.from('reviews').select('*').order('date', { ascending: false });
-      if (data) {
-        setReviews(data.map((r: any) => ({
-          id: String(r.id),
-          clientName: r.client_name,
-          rating: r.rating,
-          comment: r.comment,
-          avatarUrl: r.avatar_url,
-          date: r.date,
-          approved: r.approved
-        })));
-      }
-    } catch (error) {}
+    const { data } = await supabase.from('reviews').select('*').order('date', { ascending: false });
+    if (data) setReviews(data.map((r: any) => ({
+      id: String(r.id),
+      clientName: r.client_name,
+      rating: r.rating,
+      comment: r.comment,
+      avatarUrl: r.avatar_url,
+      date: r.date,
+      approved: r.approved
+    })));
   };
 
   const fetchBudgetRequests = async () => {
-    try {
-      const { data, error } = await supabase.from('budget_requests').select('*').order('created_at', { ascending: false });
-      if (data) setBudgetRequests(data.map((r: any) => ({...r, id: String(r.id)})) as BudgetRequest[]);
-    } catch (error) {}
+    const { data } = await supabase.from('budget_requests').select('*').order('created_at', { ascending: false });
+    if (data) setBudgetRequests(data.map((r: any) => ({...r, id: String(r.id)})) as BudgetRequest[]);
   };
 
   const addProject = async (project: Project, imageFile?: File | null, galleryFiles?: File[]) => {
     try {
-      let finalImageUrl = project.imageUrl;
+      let url = project.imageUrl;
       if (imageFile) {
-        const url = await uploadImageToStorage(imageFile);
-        if (url) finalImageUrl = url;
+        const uploaded = await uploadImageToStorage(imageFile);
+        if (uploaded) url = uploaded;
       }
-      let finalGallery = project.gallery || [];
-      if (galleryFiles && galleryFiles.length > 0) {
-        for (const file of galleryFiles) {
-           const url = await uploadImageToStorage(file);
-           if (url) finalGallery.push({ url, caption: '' });
+      let gallery = project.gallery || [];
+      if (galleryFiles) {
+        for (const f of galleryFiles) {
+          const up = await uploadImageToStorage(f);
+          if (up) gallery.push({ url: up, caption: '' });
         }
       }
-      const { data, error } = await supabase.from('projects').insert([{
-        title: project.title,
-        description: project.description,
-        type: project.type,
-        status: project.status,
-        image_url: finalImageUrl,
-        progress: project.progress,
-        completion_date: project.completionDate,
-        start_date: project.startDate,
-        gallery: finalGallery
-      }]).select();
-      if (error) throw error;
-      if (data) fetchProjects();
-    } catch (error: any) {
-      alert(`Erro: ${error.message}`);
-    }
-  };
-
-  const updateProject = async (updatedProject: Project, imageFile?: File | null) => {
-    try {
-      let finalImageUrl = updatedProject.imageUrl;
-      if (imageFile) {
-        const url = await uploadImageToStorage(imageFile);
-        if (url) finalImageUrl = url;
-      }
-      const { error } = await supabase.from('projects').update({
-        title: updatedProject.title,
-        description: updatedProject.description,
-        type: updatedProject.type,
-        status: updatedProject.status,
-        image_url: finalImageUrl,
-        progress: updatedProject.progress,
-        completion_date: updatedProject.completionDate,
-        start_date: updatedProject.startDate,
-        gallery: updatedProject.gallery
-      }).eq('id', updatedProject.id);
-      if (error) throw error;
+      await supabase.from('projects').insert([{
+        title: project.title, description: project.description, type: project.type,
+        status: project.status, image_url: url, progress: project.progress,
+        completion_date: project.completionDate, start_date: project.startDate, gallery
+      }]);
       fetchProjects();
-    } catch (error: any) {
-      alert(`Erro: ${error.message}`);
-    }
+    } catch (e) { alert("Erro ao criar projeto."); }
   };
 
-  const deleteProject = async (id: string) => {
-    const { error } = await supabase.from('projects').delete().eq('id', id);
-    if (!error) setProjects(prev => prev.filter(p => p.id !== id));
-    else alert(`Erro ao apagar: ${error.message}`);
+  const updateProject = async (proj: Project, imageFile?: File | null) => {
+    try {
+      let url = proj.imageUrl;
+      if (imageFile) {
+        const uploaded = await uploadImageToStorage(imageFile);
+        if (uploaded) url = uploaded;
+      }
+      await supabase.from('projects').update({
+        title: proj.title, description: proj.description, type: proj.type,
+        status: proj.status, image_url: url, progress: proj.progress,
+        completion_date: proj.completionDate, start_date: proj.startDate, gallery: proj.gallery
+      }).eq('id', proj.id);
+      fetchProjects();
+    } catch (e) { alert("Erro ao atualizar projeto."); }
   };
 
   const createBudgetRequest = async (formData: ContactForm): Promise<boolean> => {
     try {
       const { error } = await supabase.from('budget_requests').insert([{
-        name: formData.name,
-        email: formData.email,
-        phone: formData.phone,
-        type: formData.type,
-        description: formData.description,
-        status: 'pendente'
+        name: formData.name, email: formData.email, phone: formData.phone,
+        type: formData.type, description: formData.description, status: 'pendente'
       }]);
 
       if (!error) {
-        const emailBody = `
-          Novo Pedido de Orçamento Recebido!
-          
-          Nome: ${formData.name}
-          E-mail: ${formData.email}
-          Telefone: ${formData.phone}
-          Tipo de Obra: ${formData.type}
-          
-          Descrição:
-          ${formData.description}
-          
-          Acesse o painel administrativo para gerir esta solicitação.
-        `;
-        
-        sendEmailViaWeb3Forms(`Novo Orçamento: ${formData.name}`, emailBody).then(sent => {
-          if (!sent) console.warn("Aviso: Notificação por e-mail falhou (verifique a Access Key nas configurações).");
-        });
-        
+        const body = `NOVO ORÇAMENTO\n\nCliente: ${formData.name}\nTelemóvel: ${formData.phone}\nE-mail: ${formData.email}\nObra: ${formData.type}\n\nMensagem:\n${formData.description}`;
+        sendEmailViaWeb3Forms(`Novo Pedido: ${formData.name}`, body, formData.email);
         return true;
       }
       return false;
-    } catch (error) {
-      return false;
-    }
-  };
-  
-  const deleteBudgetRequest = async (id: string) => {
-    try {
-      const { error } = await supabase.from('budget_requests').delete().eq('id', id);
-      if (error) throw error;
-      setBudgetRequests(prev => prev.filter(r => r.id !== id));
-    } catch (error) {
-      alert("Erro ao excluir solicitação.");
-    }
+    } catch (e) { return false; }
   };
 
-  const deleteAllBudgetRequests = async () => {
-    try {
-      const { error } = await supabase.from('budget_requests').delete().filter('id', 'neq', '00000000-0000-0000-0000-000000000000');
-      if (error) throw error;
-      setBudgetRequests([]);
-      alert("Todas as solicitações foram removidas.");
-    } catch (error) {
-      alert("Erro ao processar exclusão em massa.");
-    }
-  };
-
-  const toggleReviewApproval = async (id: string, currentStatus: boolean) => {
-    const { error } = await supabase.from('reviews').update({ approved: !currentStatus }).eq('id', id);
-    if (!error) fetchReviews(true);
-  };
-
-  const deleteReview = async (id: string) => {
-    const { error } = await supabase.from('reviews').delete().eq('id', id);
-    if (!error) setReviews(prev => prev.filter(r => r.id !== id));
+  const deleteProject = async (id: string) => {
+    await supabase.from('projects').delete().eq('id', id);
+    fetchProjects();
   };
 
   const updateBudgetStatus = async (id: string, status: 'pendente' | 'contactado') => {
-    const { error } = await supabase.from('budget_requests').update({ status }).eq('id', id);
-    if (!error) setBudgetRequests(prev => prev.map(req => req.id === id ? { ...req, status } : req));
+    await supabase.from('budget_requests').update({ status }).eq('id', id);
+    fetchBudgetRequests();
   };
 
-  const login = async (email: string, password: string): Promise<LoginResult> => {
+  const login = async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return { success: false, error: error.message };
-    return { success: !!data.session };
+    return { success: !error, error: error?.message };
   };
 
-  const logout = async () => {
-    await supabase.auth.signOut();
-  };
+  const logout = async () => { await supabase.auth.signOut(); };
 
   const sendTestEmail = async (email: string) => {
-    return await sendEmailViaWeb3Forms(
-      "Teste de Configuração DNL", 
-      "Este é um e-mail de teste para validar sua Web3Forms Access Key configurada no painel administrativo.",
-      email
-    );
-  };
-
-  const addReview = async (review: Omit<Review, 'id' | 'approved'>): Promise<boolean> => {
-    try {
-      const { error } = await supabase.from('reviews').insert([{
-        client_name: review.clientName,
-        rating: review.rating,
-        comment: review.comment,
-        date: review.date,
-        avatar_url: review.avatarUrl,
-        approved: false
-      }]);
-      return !error;
-    } catch (error) {
-      return false;
-    }
+    return await sendEmailViaWeb3Forms("DNL - Teste de Sistema", "Se você recebeu isto, seu sistema de e-mail está funcionando!", email);
   };
 
   return (
     <AppContext.Provider value={{
       projects, reviews, budgetRequests, settings, addProject, updateProject, deleteProject,
-      addReview, toggleReviewApproval, deleteReview, createBudgetRequest,
-      deleteBudgetRequest, deleteAllBudgetRequests, updateBudgetStatus, updateSettings,
-      uploadImage: uploadImageToStorage, sendTestEmail, isAuthenticated, login, logout, isLoading
+      addReview: async (r) => {
+        const { error } = await supabase.from('reviews').insert([{ ...r, client_name: r.clientName, avatar_url: r.avatarUrl, approved: false }]);
+        return !error;
+      },
+      toggleReviewApproval: async (id, s) => { await supabase.from('reviews').update({ approved: !s }).eq('id', id); fetchReviews(true); },
+      deleteReview: async (id) => { await supabase.from('reviews').delete().eq('id', id); fetchReviews(true); },
+      createBudgetRequest,
+      deleteBudgetRequest: async (id) => { await supabase.from('budget_requests').delete().eq('id', id); fetchBudgetRequests(); },
+      deleteAllBudgetRequests: async () => { await supabase.from('budget_requests').delete().neq('id', '000'); fetchBudgetRequests(); },
+      updateBudgetStatus, updateSettings, uploadImage: uploadImageToStorage, sendTestEmail, isAuthenticated, login, logout, isLoading
     }}>
       {children}
     </AppContext.Provider>
@@ -436,6 +304,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
 export const useApp = () => {
   const context = useContext(AppContext);
-  if (context === undefined) throw new Error('useApp must be used within an AppProvider');
+  if (!context) throw new Error('useApp error');
   return context;
 };
