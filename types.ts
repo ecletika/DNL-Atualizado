@@ -24,6 +24,7 @@ export interface Project {
   type: ProjectType;
   status: ProjectStatus;
   imageUrl: string;
+  videoUrl?: string; // Novo campo para vídeo MP4
   progress: number; // 0-100
   completionDate?: string;
   startDate?: string;

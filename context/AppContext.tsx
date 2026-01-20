@@ -12,8 +12,8 @@ interface AppContextType {
   reviews: Review[];
   budgetRequests: BudgetRequest[];
   settings: AppSettings | null;
-  addProject: (project: Project, imageFile?: File | null, galleryFiles?: File[]) => Promise<void>;
-  updateProject: (project: Project, imageFile?: File | null) => Promise<void>;
+  addProject: (project: Project, imageFile?: File | null, videoFile?: File | null, galleryFiles?: File[]) => Promise<void>;
+  updateProject: (project: Project, imageFile?: File | null, videoFile?: File | null) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   addReview: (review: Omit<Review, 'id' | 'approved'>) => Promise<boolean>;
   toggleReviewApproval: (id: string, currentStatus: boolean) => Promise<void>;
@@ -85,9 +85,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  const uploadImageToStorage = async (file: File): Promise<string | null> => {
+  const uploadFileToStorage = async (file: File): Promise<string | null> => {
     try {
-      const fileName = `budget-${Date.now()}-${file.name.replace(/[^a-z0-9.]/gi, '_')}`;
+      const fileName = `${Date.now()}-${file.name.replace(/[^a-z0-9.]/gi, '_')}`;
       const { error: uploadError } = await supabase.storage.from('siteDNL').upload(fileName, file);
       if (uploadError) throw uploadError;
       const { data } = supabase.storage.from('siteDNL').getPublicUrl(fileName);
@@ -101,7 +101,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const fetchSettings = async () => {
     try {
       const { data } = await supabase.from('app_settings').select('notification_email, logo_url, email_api_key').limit(1).maybeSingle();
-      
       setSettings({
         id: 'settings',
         notification_email: data?.notification_email || localStorage.getItem('dnl_notif_email') || 'contacto@dnlremodelacoes.pt',
@@ -114,12 +113,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const updateSettings = async (email: string, logoUrl?: string, emailApiKey?: string): Promise<boolean> => {
-    // Atualizar LocalStorage por redundância
     localStorage.setItem('dnl_notif_email', email);
     if (logoUrl) localStorage.setItem('dnl_logo_url', logoUrl);
     if (emailApiKey) localStorage.setItem('dnl_email_api_key', emailApiKey);
 
-    // Atualizar Estado Local
     setSettings({
       id: 'settings',
       notification_email: email,
@@ -128,14 +125,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
 
     try {
-      // Persistir no Banco de Dados
       const { error } = await supabase.from('app_settings').upsert({ 
-        id: 1, // Assumindo uma única linha de configurações com ID 1
+        id: 1,
         notification_email: email, 
         logo_url: logoUrl || (settings?.logo_url || null),
         email_api_key: emailApiKey || (settings?.email_api_key || null)
       });
-      
       if (error) throw error;
       return true;
     } catch (e) {
@@ -153,6 +148,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       type: p.type,
       status: p.status,
       imageUrl: p.image_url,
+      videoUrl: p.video_url,
       progress: p.progress,
       completionDate: p.completion_date,
       startDate: p.start_date,
@@ -216,7 +212,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       let attachmentLinks = "";
       if (formData.attachments && formData.attachments.length > 0) {
-        const uploadPromises = formData.attachments.map(file => uploadImageToStorage(file));
+        const uploadPromises = formData.attachments.map(file => uploadFileToStorage(file));
         const urls = await Promise.all(uploadPromises);
         const validUrls = urls.filter(url => url !== null);
         if (validUrls.length > 0) {
@@ -232,7 +228,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       if (!error) {
         const body = `NOVO PEDIDO DE ORÇAMENTO\n\nCliente: ${formData.name}\nTelemóvel: ${formData.phone}\nE-mail: ${formData.email}\nObra: ${formData.type}\n\nMensagem:\n${formData.description}${attachmentLinks}`;
         await sendEmailViaWeb3Forms(`Novo Orçamento: ${formData.name}`, body, formData.email);
-        
         if (isAuthenticated) await fetchBudgetRequests();
         return true;
       }
@@ -243,23 +238,30 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  const addProject = async (project: Project, imageFile?: File | null, galleryFiles?: File[]) => {
+  const addProject = async (project: Project, imageFile?: File | null, videoFile?: File | null, galleryFiles?: File[]) => {
     try {
-      let url = project.imageUrl;
+      let imgUrl = project.imageUrl;
       if (imageFile) {
-        const uploaded = await uploadImageToStorage(imageFile);
-        if (uploaded) url = uploaded;
+        const uploaded = await uploadFileToStorage(imageFile);
+        if (uploaded) imgUrl = uploaded;
       }
+      
+      let vidUrl = project.videoUrl;
+      if (videoFile) {
+        const uploaded = await uploadFileToStorage(videoFile);
+        if (uploaded) vidUrl = uploaded;
+      }
+
       let gallery: GalleryItem[] = [];
       if (galleryFiles && galleryFiles.length > 0) {
         for (const f of galleryFiles) {
-          const up = await uploadImageToStorage(f);
+          const up = await uploadFileToStorage(f);
           if (up) gallery.push({ url: up, caption: '' });
         }
       }
       await supabase.from('projects').insert([{
         title: project.title, description: project.description, type: project.type,
-        status: project.status, image_url: url, progress: project.progress,
+        status: project.status, image_url: imgUrl, video_url: vidUrl, progress: project.progress,
         completion_date: project.completionDate, start_date: project.startDate, gallery
       }]);
       await fetchProjects();
@@ -268,16 +270,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  const updateProject = async (proj: Project, imageFile?: File | null) => {
+  const updateProject = async (proj: Project, imageFile?: File | null, videoFile?: File | null) => {
     try {
-      let url = proj.imageUrl;
+      let imgUrl = proj.imageUrl;
       if (imageFile) {
-        const uploaded = await uploadImageToStorage(imageFile);
-        if (uploaded) url = uploaded;
+        const uploaded = await uploadFileToStorage(imageFile);
+        if (uploaded) imgUrl = uploaded;
       }
+
+      let vidUrl = proj.videoUrl;
+      if (videoFile) {
+        const uploaded = await uploadFileToStorage(videoFile);
+        if (uploaded) vidUrl = uploaded;
+      }
+
       await supabase.from('projects').update({
         title: proj.title, description: proj.description, type: proj.type,
-        status: proj.status, image_url: url, progress: proj.progress,
+        status: proj.status, image_url: imgUrl, video_url: vidUrl, progress: proj.progress,
         completion_date: proj.completionDate, start_date: proj.startDate, gallery: proj.gallery
       }).eq('id', proj.id);
       await fetchProjects();
@@ -301,7 +310,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       deleteBudgetRequest: async (id) => { await supabase.from('budget_requests').delete().eq('id', id); fetchBudgetRequests(); },
       deleteAllBudgetRequests: async () => { await supabase.from('budget_requests').delete().neq('id', '000'); fetchBudgetRequests(); },
       updateBudgetStatus: async (id, status) => { await supabase.from('budget_requests').update({ status }).eq('id', id); fetchBudgetRequests(); },
-      updateSettings, uploadImage: uploadImageToStorage, sendTestEmail: async (e) => await sendEmailViaWeb3Forms("Teste", "Funcionando!", e),
+      updateSettings, uploadImage: uploadFileToStorage, sendTestEmail: async (e) => await sendEmailViaWeb3Forms("Teste", "Funcionando!", e),
       isAuthenticated, login, logout, isLoading
     }}>
       {children}
