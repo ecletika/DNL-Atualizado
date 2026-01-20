@@ -45,17 +45,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       setIsAuthenticated(!!session);
-      
       await fetchProjects();
       await fetchReviews(!!session); 
       await fetchSettings();
-      
-      if (session) {
-        await fetchBudgetRequests();
-      }
+      if (session) await fetchBudgetRequests();
       setIsLoading(false);
     };
-    
     init();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -65,18 +60,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       fetchReviews(isAuth); 
       if (isAuth) fetchBudgetRequests();
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
   const sendEmailViaWeb3Forms = async (subject: string, content: string, clientEmail?: string): Promise<boolean> => {
-    const accessKey = localStorage.getItem('dnl_email_api_key') || settings?.email_api_key;
-
-    if (!accessKey) {
-      console.warn("Chave de e-mail não disponível.");
-      return false;
-    }
-
+    const accessKey = settings?.email_api_key || localStorage.getItem('dnl_email_api_key');
+    if (!accessKey) return false;
     try {
       const response = await fetch("https://api.web3forms.com/submit", {
         method: "POST",
@@ -89,18 +78,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           message: content,
         }),
       });
-
       const result = await response.json();
       return result.success;
     } catch (error) {
-      console.error("Erro ao enviar e-mail:", error);
       return false;
     }
   };
 
   const uploadImageToStorage = async (file: File): Promise<string | null> => {
     try {
-      const fileName = `${Date.now()}-${file.name.replace(/[^a-z0-9.]/gi, '_')}`;
+      const fileName = `budget-${Date.now()}-${file.name.replace(/[^a-z0-9.]/gi, '_')}`;
       const { error: uploadError } = await supabase.storage.from('siteDNL').upload(fileName, file);
       if (uploadError) throw uploadError;
       const { data } = supabase.storage.from('siteDNL').getPublicUrl(fileName);
@@ -113,36 +100,48 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const fetchSettings = async () => {
     try {
-      const { data } = await supabase.from('app_settings').select('notification_email, logo_url').limit(1).maybeSingle();
-      const localEmail = localStorage.getItem('dnl_notif_email');
-      const localLogo = localStorage.getItem('dnl_logo_url');
-      const localKey = localStorage.getItem('dnl_email_api_key');
-
+      const { data } = await supabase.from('app_settings').select('notification_email, logo_url, email_api_key').limit(1).maybeSingle();
+      
       setSettings({
         id: 'settings',
-        notification_email: data?.notification_email || localEmail || 'contacto@dnlremodelacoes.pt',
-        logo_url: data?.logo_url || localLogo || '',
-        email_api_key: localKey || ''
+        notification_email: data?.notification_email || localStorage.getItem('dnl_notif_email') || 'contacto@dnlremodelacoes.pt',
+        logo_url: data?.logo_url || localStorage.getItem('dnl_logo_url') || '',
+        email_api_key: data?.email_api_key || localStorage.getItem('dnl_email_api_key') || ''
       });
-    } catch (error) {}
+    } catch (error) {
+      console.error("Erro ao carregar definições:", error);
+    }
   };
 
   const updateSettings = async (email: string, logoUrl?: string, emailApiKey?: string): Promise<boolean> => {
+    // Atualizar LocalStorage por redundância
     localStorage.setItem('dnl_notif_email', email);
     if (logoUrl) localStorage.setItem('dnl_logo_url', logoUrl);
     if (emailApiKey) localStorage.setItem('dnl_email_api_key', emailApiKey);
 
+    // Atualizar Estado Local
     setSettings({
       id: 'settings',
       notification_email: email,
       logo_url: logoUrl || settings?.logo_url || '',
-      email_api_key: emailApiKey || localStorage.getItem('dnl_email_api_key') || ''
+      email_api_key: emailApiKey || settings?.email_api_key || ''
     });
 
     try {
-      await supabase.from('app_settings').upsert({ notification_email: email, logo_url: logoUrl || (settings?.logo_url || null) });
-    } catch (e) {}
-    return true;
+      // Persistir no Banco de Dados
+      const { error } = await supabase.from('app_settings').upsert({ 
+        id: 1, // Assumindo uma única linha de configurações com ID 1
+        notification_email: email, 
+        logo_url: logoUrl || (settings?.logo_url || null),
+        email_api_key: emailApiKey || (settings?.email_api_key || null)
+      });
+      
+      if (error) throw error;
+      return true;
+    } catch (e) {
+      console.error("Erro ao persistir definições:", e);
+      return false;
+    }
   };
 
   const fetchProjects = async () => {
@@ -162,10 +161,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const fetchReviews = async (isAdmin: boolean) => {
-    // Se não for admin, pegamos apenas os aprovados. Se for admin, pegamos todos.
     const query = supabase.from('reviews').select('*').order('date', { ascending: false });
     if (!isAdmin) query.eq('approved', true);
-    
     const { data } = await query;
     if (data) setReviews(data.map((r: any) => ({
       id: String(r.id),
@@ -188,9 +185,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         avatar_url: review.avatarUrl,
         approved: false
       }]);
-
       if (!error) {
-        const body = `NOVA AVALIAÇÃO RECEBIDA\n\nCliente: ${review.clientName}\nClassificação: ${review.rating} estrelas\nComentário: ${review.comment}\n\nAcesse o painel admin para aprovar.`;
+        const body = `NOVA AVALIAÇÃO RECEBIDA\n\nCliente: ${review.clientName}\nClassificação: ${review.rating} estrelas\nComentário: ${review.comment}\n\nAceda ao painel admin para aprovar.`;
         await sendEmailViaWeb3Forms(`Novo Comentário: ${review.clientName}`, body);
         fetchReviews(isAuthenticated);
         return true;
@@ -201,19 +197,50 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  const deleteReview = async (id: string) => {
-    await supabase.from('reviews').delete().eq('id', id);
+  const toggleReviewApproval = async (id: string, currentStatus: boolean) => {
+    await supabase.from('reviews').update({ approved: !currentStatus }).eq('id', id);
     fetchReviews(true);
   };
 
-  const toggleReviewApproval = async (id: string, currentStatus: boolean) => {
-    await supabase.from('reviews').update({ approved: !currentStatus }).eq('id', id);
+  const deleteReview = async (id: string) => {
+    await supabase.from('reviews').delete().eq('id', id);
     fetchReviews(true);
   };
 
   const fetchBudgetRequests = async () => {
     const { data } = await supabase.from('budget_requests').select('*').order('created_at', { ascending: false });
     if (data) setBudgetRequests(data.map((r: any) => ({...r, id: String(r.id)})) as BudgetRequest[]);
+  };
+
+  const createBudgetRequest = async (formData: ContactForm): Promise<boolean> => {
+    try {
+      let attachmentLinks = "";
+      if (formData.attachments && formData.attachments.length > 0) {
+        const uploadPromises = formData.attachments.map(file => uploadImageToStorage(file));
+        const urls = await Promise.all(uploadPromises);
+        const validUrls = urls.filter(url => url !== null);
+        if (validUrls.length > 0) {
+          attachmentLinks = "\n\nFOTOS ANEXADAS:\n" + validUrls.join("\n");
+        }
+      }
+
+      const { error } = await supabase.from('budget_requests').insert([{
+        name: formData.name, email: formData.email, phone: formData.phone,
+        type: formData.type, description: formData.description, status: 'pendente'
+      }]);
+
+      if (!error) {
+        const body = `NOVO PEDIDO DE ORÇAMENTO\n\nCliente: ${formData.name}\nTelemóvel: ${formData.phone}\nE-mail: ${formData.email}\nObra: ${formData.type}\n\nMensagem:\n${formData.description}${attachmentLinks}`;
+        await sendEmailViaWeb3Forms(`Novo Orçamento: ${formData.name}`, body, formData.email);
+        
+        if (isAuthenticated) await fetchBudgetRequests();
+        return true;
+      }
+      return false;
+    } catch (e) { 
+      console.error("Erro ao criar pedido de orçamento:", e);
+      return false; 
+    }
   };
 
   const addProject = async (project: Project, imageFile?: File | null, galleryFiles?: File[]) => {
@@ -223,8 +250,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const uploaded = await uploadImageToStorage(imageFile);
         if (uploaded) url = uploaded;
       }
-      let gallery = project.gallery || [];
-      if (galleryFiles) {
+      let gallery: GalleryItem[] = [];
+      if (galleryFiles && galleryFiles.length > 0) {
         for (const f of galleryFiles) {
           const up = await uploadImageToStorage(f);
           if (up) gallery.push({ url: up, caption: '' });
@@ -235,8 +262,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         status: project.status, image_url: url, progress: project.progress,
         completion_date: project.completionDate, start_date: project.startDate, gallery
       }]);
-      fetchProjects();
-    } catch (e) { alert("Erro ao criar projeto."); }
+      await fetchProjects();
+    } catch (e) {
+      console.error("Erro ao adicionar projeto:", e);
+    }
   };
 
   const updateProject = async (proj: Project, imageFile?: File | null) => {
@@ -251,24 +280,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         status: proj.status, image_url: url, progress: proj.progress,
         completion_date: proj.completionDate, start_date: proj.startDate, gallery: proj.gallery
       }).eq('id', proj.id);
-      fetchProjects();
-    } catch (e) { alert("Erro ao atualizar projeto."); }
-  };
-
-  const createBudgetRequest = async (formData: ContactForm): Promise<boolean> => {
-    try {
-      const { error } = await supabase.from('budget_requests').insert([{
-        name: formData.name, email: formData.email, phone: formData.phone,
-        type: formData.type, description: formData.description, status: 'pendente'
-      }]);
-
-      if (!error) {
-        const body = `NOVO ORÇAMENTO\n\nCliente: ${formData.name}\nTelemóvel: ${formData.phone}\nE-mail: ${formData.email}\nObra: ${formData.type}\n\nMensagem:\n${formData.description}`;
-        await sendEmailViaWeb3Forms(`Novo Orçamento: ${formData.name}`, body, formData.email);
-        return true;
-      }
-      return false;
-    } catch (e) { return false; }
+      await fetchProjects();
+    } catch (e) {
+      console.error("Erro ao atualizar projeto:", e);
+    }
   };
 
   const login = async (email: string, password: string) => {
@@ -280,9 +295,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   return (
     <AppContext.Provider value={{
-      projects, reviews, budgetRequests, settings, addProject, updateProject, deleteProject: async (id) => { await supabase.from('projects').delete().eq('id', id); fetchProjects(); },
-      addReview, toggleReviewApproval, deleteReview,
-      createBudgetRequest,
+      projects, reviews, budgetRequests, settings, addProject, updateProject, 
+      deleteProject: async (id) => { await supabase.from('projects').delete().eq('id', id); fetchProjects(); },
+      addReview, toggleReviewApproval, deleteReview, createBudgetRequest,
       deleteBudgetRequest: async (id) => { await supabase.from('budget_requests').delete().eq('id', id); fetchBudgetRequests(); },
       deleteAllBudgetRequests: async () => { await supabase.from('budget_requests').delete().neq('id', '000'); fetchBudgetRequests(); },
       updateBudgetStatus: async (id, status) => { await supabase.from('budget_requests').update({ status }).eq('id', id); fetchBudgetRequests(); },

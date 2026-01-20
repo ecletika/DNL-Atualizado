@@ -3,20 +3,12 @@ import { GoogleGenAI } from "@google/genai";
 import { ProjectType } from "../types";
 
 /**
- * Generates a professional description for a project using Google Gemini AI.
+ * Generates a professional description for a project using Google Gemini API.
  * Always uses the 'gemini-3-flash-preview' model for text generation tasks.
  */
 export const generateProjectDescription = async (title: string, type: ProjectType): Promise<string> => {
-  // Use process.env.API_KEY directly as required by guidelines.
-  const apiKey = process.env.API_KEY;
-  
-  if (!apiKey) {
-    console.warn("API Key not found in environment variables.");
-    return "Descrição automática indisponível. Por favor, configure a API Key.";
-  }
-
-  // Initialize Gemini API client correctly using named parameters.
-  const ai = new GoogleGenAI({ apiKey });
+  // Initialize Gemini API client correctly using named parameters and process.env.API_KEY directly.
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   try {
     const prompt = `Escreva uma descrição profissional, atraente e concisa (máximo 40 palavras) para um projeto de portfólio de uma empresa de reformas chamada DNL Remodelações. 
@@ -26,11 +18,12 @@ export const generateProjectDescription = async (title: string, type: ProjectTyp
 
     // Correctly call generateContent with the model name and contents.
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview', // Use 'gemini-3-flash-preview' for basic text tasks.
+      model: 'gemini-3-flash-preview',
       contents: prompt,
     });
 
-    // Extract text output using the .text property from GenerateContentResponse.
+    // Extract text output using the .text property from GenerateContentResponse as per guidelines.
+    // Note: Do not use response.text() as it is a property/getter.
     return response.text?.trim() || "Sem descrição gerada.";
   } catch (error: any) {
     console.error("Error generating description:", error);
