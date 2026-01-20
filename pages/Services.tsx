@@ -37,7 +37,7 @@ const Services: React.FC = () => {
   ];
 
   return (
-    <div className="bg-[#F5F5F5] min-h-screen pt-24 pb-20">
+    <div className="bg-[#F5F5F5] min-h-screen pt-32 md:pt-40 pb-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-16">
           <h1 className="text-4xl md:text-5xl font-bold text-[#1F4E79] mb-4 font-['Oswald']">Os Nossos Serviços</h1>

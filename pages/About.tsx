@@ -19,7 +19,7 @@ const About: React.FC = () => {
     { 
       icon: Shield, 
       t: "Honestidade", 
-      d: "Transparência total em orçamentos, prazos e relações. A confiança é o alicerce de todas as nossas obras." 
+      d: "Transparência total em orçamentos, prazos e relações. A confiança é o alecerce de todas as nossas obras." 
     },
     { 
       icon: Heart, 
@@ -39,7 +39,7 @@ const About: React.FC = () => {
   ];
 
   return (
-    <div className="bg-[#F5F5F5] min-h-screen pt-24 pb-20">
+    <div className="bg-[#F5F5F5] min-h-screen pt-32 md:pt-40 pb-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* Header & Logo Section - Restaurado com Logo Grande */}
